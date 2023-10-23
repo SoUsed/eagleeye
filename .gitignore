@@ -1,6 +1,4 @@
 out*
 target
 *jpg
-*png
-*bmp
 Cargo.lock
