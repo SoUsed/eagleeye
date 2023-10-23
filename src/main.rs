@@ -134,7 +134,7 @@ fn screen_cells(hwnd: HWND) {
         }
     });
 
-    let num_threads = 3;
+    let num_threads = 1;
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()
@@ -143,6 +143,11 @@ fn screen_cells(hwnd: HWND) {
     let screenshot_data = screenshot_data.clone();
     pool.broadcast(|_| {
         logentry("I am alive".to_string());
+        let tess_data_path = CString::new("C:\\Program Files\\Tesseract-OCR\\tessdata").expect("Failed to create CString");
+        let tess_api = unsafe { tesseract::TessBaseAPICreate() };
+        if unsafe { tesseract::TessBaseAPIInit3(tess_api, tess_data_path.as_ptr(), std::ptr::null()) } != 0 {
+            panic!("Tesseract initialization failed");
+        }
         loop {
             let mut rng = rand::thread_rng();
             let screenshot = {
@@ -163,6 +168,42 @@ fn screen_cells(hwnd: HWND) {
                 .save(&screenshot.filename)
                 .expect("Failed to save image");
             logentry(format!("Saved {}", screenshot.filename));
+
+            let mut image_data: Vec<u8> = Vec::new();
+            let image = screenshot.screenshot;
+            for pixel in image.pixels() {
+                image_data.push(pixel[0]);
+                image_data.push(pixel[1]);
+                image_data.push(pixel[2]);
+                image_data.push(pixel[3]);
+            }
+        
+            let image_width = image.width() as i32;
+            let image_height = image.height() as i32;
+        
+            // Set the image from bytes
+            if unsafe {
+                tesseract::TessBaseAPISetImage2(
+                    tess_api,
+                    image_data.as_ptr(),
+                    image_data.len() as i32,
+                    image_width,
+                    image_height,
+                    4 * image_width,
+                )
+            } != 0 {
+                panic!("Failed to set image");
+            }
+        
+            // Perform OCR
+            unsafe { tesseract::TessBaseAPIRecognize(tess_api, std::ptr::null_mut()) }
+        
+            // Get the result
+            let result = unsafe { tesseract::TessBaseAPIGetUTF8Text(tess_api) };
+            let text = unsafe { std::ffi::CStr::from_ptr(result) }.to_str().unwrap();
+        
+            // Print the extracted text
+            logentry(format!("Extracted Text: {}", text));
             thread::sleep(std::time::Duration::from_millis(rng.gen_range(50..=100)));
         }
     });
