@@ -1,4 +1,4 @@
-use image::RgbaImage;
+use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba, RgbaImage};
 use std::time::Instant;
 use std::{thread, time};
 use win_screenshot::prelude::*;
@@ -12,8 +12,8 @@ use winapi::um::winuser::{mouse_event, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTU
 use winapi::um::winuser::{FindWindowW, SetForegroundWindow};
 
 extern crate rayon;
-use rand::prelude::*;
-use std::sync::{Arc, Mutex};
+use crate::rayon::iter::IntoParallelRefIterator;
+use crate::rayon::iter::ParallelIterator;
 extern crate chrono;
 
 use chrono::Local;
@@ -52,118 +52,60 @@ fn bring_front(hwnd: HWND) {
     }
 }
 
-fn take_screenshot(cx: i32, cy: i32, hwnd: HWND) -> RgbaImage {
-    let now = Instant::now();
-    let offset = 250;
-    let left: i32 = if cx > offset { cx - offset } else { 0 };
-    let right: i32 = if cx < 1617 - offset {
-        cx + offset
-    } else {
-        1617
-    };
-    let top: i32 = if cy > offset { cy - offset } else { 0 };
-    let bottom: i32 = if cy < 1007 - offset {
-        cy + offset
-    } else {
-        1007
-    };
-
-    let buf: RgbBuf = capture_window_ex(
-        hwnd as isize,
-        Using::BitBlt,
-        Area::ClientOnly,
-        Some([left, top]),
-        Some([right - left, bottom - top]),
-    )
-    .unwrap(); // unhappy case?
-    logentry(format!(
-        "Screenshot taken, time spent: {} ms",
-        now.elapsed().as_millis()
-    ));
-    return RgbaImage::from_raw(buf.width, buf.height, buf.pixels).unwrap();
-}
-
 struct ScreenshotData {
     screenshot: RgbaImage,
     filename: String,
 }
 
-fn screen_cells(hwnd: HWND) {
-    let screenshot_data = Arc::new(Mutex::new(vec![]));
+fn screenshot_all_cells(hwnd: HWND) {
+    let cell_size = 32;
+    
+    let VERT_CELLS = 33;
+    let HORI_CELLS = 54;
 
-    // Ain't It Funny?
-    let hwnd2 = hwnd as usize;
-    thread::spawn({
-        let screenshot_data = screenshot_data.clone();
-        move || {
-            let now: Instant = Instant::now();
-            let cell_size = 48;
-            for row in (cell_size / 2..(34 * cell_size)).step_by(cell_size) {
-                for col in (cell_size / 2..(21 * cell_size)).step_by(cell_size) {
-                    let fifty_millis: time::Duration = time::Duration::from_millis(50);
-                    let ten_millis: time::Duration = time::Duration::from_millis(30);
+    unsafe {
+        if SetCursorPos(1800, 950) == 0 {
+            panic!("SetCursorPos failed");
+        }
+    }
 
-                    // move position
-                    unsafe {
-                        if SetCursorPos(row as i32, col as i32) == 0 {
-                            panic!("SetCursorPos failed");
-                        }
-                        thread::sleep(ten_millis);
-                        mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
-                    }
-                    thread::sleep(fifty_millis);
+    let now = Instant::now();
+    let buf: RgbBuf = capture_window_ex(
+        hwnd as isize,
+        Using::BitBlt,
+        Area::ClientOnly,
+        None,
+        None
+    )
+    .unwrap(); // unhappy case?
 
-                    let screenshot = take_screenshot(row as i32, col as i32, hwnd2 as HWND);
-                    let filename = format!("out/screenshot_{}_{}.jpg", row, col);
-                    unsafe {
-                        mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
-                    }
-                    let data = ScreenshotData {
-                        screenshot,
-                        filename,
-                    };
-                    thread::sleep(ten_millis);
-                    screenshot_data.lock().unwrap().push(data);
-                }
+    logentry(format!(
+        "Screenshot taken, time spent: {} ms",
+        now.elapsed().as_millis()
+    ));
+
+    let screenshot = RgbaImage::from_raw(buf.width, buf.height, buf.pixels).unwrap();
+
+    (cell_size / 2..(HORI_CELLS * cell_size))
+        .step_by(cell_size)
+        .collect::<Vec<_>>()
+        .par_iter()
+        .for_each(|&row| {
+            for col in (cell_size / 2..(VERT_CELLS * cell_size)).step_by(cell_size) {
+                let filename = format!("out/screenshot_{}_{}.jpg", row, col);
+
+                let cropped = screenshot
+                    .view(
+                        (row - cell_size / 2) as u32,
+                        (col - cell_size / 2 + 8) as u32, // +8 because of weird HOMM3 layout
+                        cell_size as u32,
+                        cell_size as u32,
+                    )
+                    .to_image();
+
+                cropped.save(filename).unwrap();
             }
-            logentry(format!(
-                "All screenshots taken, it took {} ms",
-                now.elapsed().as_millis()
-            ));
-        }
-    });
-
-    let num_threads = 3;
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build()
-        .unwrap();
-
-    let screenshot_data = screenshot_data.clone();
-    pool.broadcast(|_| {
-        logentry("I am alive".to_string());
-        loop {
-            let mut rng = rand::thread_rng();
-            let screenshot = {
-                let mut data: std::sync::MutexGuard<'_, Vec<ScreenshotData>> =
-                    screenshot_data.lock().unwrap();
-                if let Some(data) = data.pop() {
-                    logentry("Thread got some".to_string());
-                    data
-                } else {
-                    logentry("Thread didn't got anything".to_string());
-                    thread::sleep(std::time::Duration::from_millis(rng.gen_range(50..=100)));
-                    continue;
-                }
-            };
-
-            screenshot
-                .screenshot
-                .save(&screenshot.filename)
-                .expect("Failed to save image");
-            logentry(format!("Saved {}", screenshot.filename));
-        }
-    });
+        });
 }
 
 fn main() {
@@ -171,8 +113,14 @@ fn main() {
     std::fs::create_dir_all("out").unwrap();
     std::fs::remove_dir_all("out").unwrap();
     std::fs::create_dir("out").unwrap();
+    let now = Instant::now();
     let hwnd = get_hwnd();
     bring_front(hwnd);
-    thread::sleep(std::time::Duration::from_millis(10));
-    screen_cells(hwnd);
+    thread::sleep(std::time::Duration::from_millis(100));
+    screenshot_all_cells(hwnd);
+    logentry(format!(
+        "All took {} ms",
+        now.elapsed().as_millis()
+    ));
+
 }
