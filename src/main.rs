@@ -1,6 +1,6 @@
-use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba, RgbaImage};
+use image::{GenericImageView, RgbaImage};
 use std::time::Instant;
-use std::{thread, time};
+use std::thread;
 use win_screenshot::prelude::*;
 
 use std::ffi::OsString;
@@ -8,7 +8,6 @@ use std::os::windows::ffi::OsStrExt;
 use winapi::shared::windef::HWND;
 use winapi::um::winnt::LPWSTR;
 use winapi::um::winuser::SetCursorPos;
-use winapi::um::winuser::{mouse_event, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP};
 use winapi::um::winuser::{FindWindowW, SetForegroundWindow};
 
 extern crate rayon;
@@ -92,7 +91,7 @@ fn screenshot_all_cells(hwnd: HWND) {
         .par_iter()
         .for_each(|&row| {
             for col in (cell_size / 2..(VERT_CELLS * cell_size)).step_by(cell_size) {
-                let filename = format!("out/screenshot_{}_{}.jpg", row, col);
+                let filename = format!("out/screenshot_{}_{}.bmp", row, col);
 
                 let cropped = screenshot
                     .view(
