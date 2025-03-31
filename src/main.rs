@@ -17,6 +17,11 @@ extern crate chrono;
 
 use chrono::Local;
 
+pub mod eetypes;
+pub mod eeminimap;
+
+use crate::eeminimap::{parse_minimap, locate_topleft_corner};
+
 fn logentry(msg: String) {
     println!(
         "[Eagle Eye]\t{:?}\t{}\t{}",
@@ -54,6 +59,14 @@ fn bring_front(hwnd: HWND) {
 struct ScreenshotData {
     screenshot: RgbaImage,
     filename: String,
+}
+
+fn extract_minimap(screenshot: &RgbaImage) -> RgbaImage {
+    let MINIMAP_ORIGIN_X: u32 = 1750;
+    let MINIMAP_ORIGIN_Y: u32 = 26;
+    let MINIMAP_SIZE: u32 = 144;
+
+    screenshot.view(MINIMAP_ORIGIN_X, MINIMAP_ORIGIN_Y, MINIMAP_SIZE, MINIMAP_SIZE).to_image()
 }
 
 fn screenshot_all_cells(hwnd: HWND) {
@@ -105,6 +118,14 @@ fn screenshot_all_cells(hwnd: HWND) {
                 cropped.save(filename).unwrap();
             }
         });
+        
+        let mmap = extract_minimap(&screenshot);
+        mmap.save("out/screenshot_minimap.bmp").unwrap();
+        let parsed_mmap = parse_minimap(&mmap, 144);
+        let tl_corner = locate_topleft_corner(&mmap, 144);
+        logentry(format!("TL corner: {:?}", tl_corner));
+        logentry(format!("Parsed minimap: {:?}", parsed_mmap));
+
 }
 
 fn main() {
